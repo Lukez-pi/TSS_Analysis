@@ -24,8 +24,9 @@ for seq_record in SeqIO.parse(sequence_file, "genbank"):
     gene_counter = 1
     previous_start = 0
     for feature in seq_record.features:
-        if feature.type == "gene":
-            locus_tag = feature.qualifiers["locus_tag"]
+        if feature.type == "CDS":
+            temp = feature.qualifiers["locus_tag"][0].split("_")
+            locus_tag = temp[0] + temp[1]
             strand = feature.strand
             if strand == -1:
                 start_position = feature.location.end
@@ -34,34 +35,29 @@ for seq_record in SeqIO.parse(sequence_file, "genbank"):
                 start_position = feature.location.start
                 end_position = feature.location.end
 
-            if feature.location.start >= feature.location.end:
-                raise Exception("start and end position doesn't make sense")
-            if start_position <= previous_start:
-                print(previous_start)
-                print(start_position)
-                print(locus_tag)
-                print("overlapping genes")
             previous_start = start_position
             
-            seq[locus_tag[0]] = {"feature": feature, "gene_num": gene_counter}
-            list_of_genes.append(locus_tag[0])
+            seq[locus_tag] = {"feature": feature, "gene_num": gene_counter}
+            list_of_genes.append(locus_tag)
             gene_counter += 1
             
     print("total number of genes")
-    print(gene_counter)
+    print(gene_counter-1)
 
 def test_gene(f):
     # f is the excel file
     unfound_tags = []
+    overlapping_genes = []
     unmatch_gene_len = []
     unmatch_start_pos = []
     unmatch_start_neg = []
     unmatch_direction = []
     def apply_fcn(row):
-        tag = row["Locus tag"][:2] + "_" + row["Locus tag"][2:]
+        tag = row["Locus tag"]
         tss_pos = row["Position"]
         excel_gene_len = row["Gene length"]
         utr_len = row["UTR length"]
+        
         if tag not in seq:
             unfound_tags.append(row["Locus tag"])
         else:
@@ -69,9 +65,19 @@ def test_gene(f):
             end_pos = seq[tag]["feature"].location.end
             strand = seq[tag]["feature"].location.strand
             genbank_gene_len = end_pos - start_pos
+            
+            if seq[tag]["feature"].location.start >= seq[tag]["feature"].location.end:
+                raise Exception("start and end position doesn't make sense")
+                
+            # Find genes that are overlapping
+            if start_position <= previous_start:
+                overlapping_genes.append(tag)
+            
+            # Find tags that exist in Excel but not in the Genbank file
             if genbank_gene_len != excel_gene_len:
                 unmatch_gene_len.append(row["Locus tag"])
-            
+                
+            # Find genes that have different starting positions and directions
             if row["Strand"] == "-":
                 if strand == -1:
                     if (end_pos + utr_len) != tss_pos:
@@ -113,26 +119,31 @@ def test_gene(f):
     for (tag, d) in unmatch_start_pos:
         unmatch_start_tags.add(tag)
         diff_pos.append(d)
-    plt.figure()
-    plt.title("diff pos")
-    plt.hist(diff_pos)
     
     print("There are also {} genes that didn't have matching start sites in the bottom strand".format(len(unmatch_start_neg)))
     diff_neg = []
     for (tag, d) in unmatch_start_neg:
         unmatch_start_tags.add(tag)
         diff_neg.append(d)
-    plt.figure()
-    plt.title("diff neg")
-    plt.hist(diff_neg)
-          
-    print("done searching")
-    print("")
-    unmatch_start_len = set(unmatch_gene_len).intersection(unmatch_start_tags)
-    unmatch_start_tags 
-    return (unmatch_start_tags - unmatch_start_len)
+    # plot the number of base pairs that the excel data and the gen bank data differ by
+# =============================================================================
+#     plt.figure()
+#     plt.title("diff pos")
+#     plt.hist(diff_pos)
+#         
+#     plt.figure()
+#     plt.title("diff neg")
+#     plt.hist(diff_neg)
+# =============================================================================
     
-unmatch_start_tags = test_gene(excel_f)
+    unmatch_start_match_len = unmatch_start_tags - set(unmatch_gene_len)
+    unmatch_start_match_len_match_dir = unmatch_start_match_len - set(unmatch_direction)
+    print("\nOut of the {} genes that are unmatching in start position, there are {} genes that are matching in length".format(len(unmatch_start_tags), len(unmatch_start_match_len)))
+    print("Additionally, when we remove the genes that are also unmatching in direction")
+    print("This leaves us with {} genes to be matching in length, direction but not starting sites\n".format(len(unmatch_start_match_len_match_dir)))
+    return [set(unmatch_gene_len), unmatch_start_match_len_match_dir]
+    
+[unmatch_gene_len, unmatching_tags] = test_gene(excel_f) 
 
 def compare_version(unmatch_start_tags):
     unmatch_version_tags = []
@@ -155,6 +166,8 @@ def compare_version(unmatch_start_tags):
                 if locus_tag in unmatch_tags:
                     v4_record.append(feature)
     
+    counter = 0
+    print("\n")
     for (tag3, tag4) in zip(v3_record, v4_record):
         if tag3.qualifiers["locus_tag"][0] != tag4.qualifiers["locus_tag"][0]:
             raise Exception("unmatching tags")
@@ -169,23 +182,33 @@ def compare_version(unmatch_start_tags):
         if strand3 != strand4:
             print("not the same strand")
         if strand3 == -1:            
-            if seq_record3[start3:end3+200].seq._data != seq_record4[start4:end4+200].seq._data:
-                unmatch_version_tags.append(tag3)
+            if seq_record3[start3:end3+300].seq._data != seq_record4[start4:end4+300].seq._data:
+                tag_name = tag3.qualifiers["locus_tag"][0]
+                new_tag_name = tag_name.split("_")[0] + tag_name.split("_")[1]
+                unmatch_version_tags.append(new_tag_name)
         elif strand3 == 1:            
-            if seq_record3[start3-200:end3].seq._data != seq_record4[start4-200:end4].seq._data:
-                unmatch_version_tags.append(tag3)
+            if seq_record3[start3-300:end3].seq._data != seq_record4[start4-300:end4].seq._data:
+                tag_name = tag3.qualifiers["locus_tag"][0]
+                new_tag_name = tag_name.split("_")[0] + tag_name.split("_")[1]
+                unmatch_version_tags.append(new_tag_name)
         else:
             raise Exception("wrong strand notation: {}".format(strand3))
-    print(len(unmatch_version_tags))
-    print("")
-    print("")
-    print("")
-
-# compare_version(unmatch_start_tags)
+        counter += 1
+        if counter % 50 == 0:
+            print("we are currently at iteration {}....".format(counter))
+    print("\nAfter comparing v3 to v4, we found that out of the genes with valid pam sites but different starting positions,")
+    print("there are {} genes that have a different sequence".format(len(unmatch_version_tags)))
+    print(unmatch_version_tags)
+    for t in unmatch_version_tags:
+        print(t)
+        
+    # return all genes that should be fine, despite a different starting position
+    return unmatch_start_tags - set(unmatch_version_tags)
     
-def filter_fun(row, seq):
+    
+def filter_by_intergenic_len(row, seq):
     offset = 100
-    tag = row["Locus tag"][:2] + "_" + row["Locus tag"][2:]
+    tag = row["Locus tag"]
     tss_pos = row["Position"]
     if tag in seq:
         gene_num = seq[tag]["gene_num"]
@@ -194,17 +217,20 @@ def filter_fun(row, seq):
             adjacent_gene_tag = list_of_genes[adjacent_gene_num - 1]
             start_pos = seq[adjacent_gene_tag]["feature"].location.start
             return True if tss_pos < (start_pos - offset) else False
-        else:
+        elif seq[tag]["feature"].strand == 1:
             adjacent_gene_num = gene_num - 1
             adjacent_gene_tag = list_of_genes[adjacent_gene_num - 1]
             end_pos = seq[adjacent_gene_tag]["feature"].location.end   
             return True if tss_pos > (end_pos + offset) else False
+        else:
+            raise Exception("wrong strand input format: {}".format(seq[tag]["feature"].strand))
     else:
         return False
 
 NGG_count = dict()
 CCN_count = dict()
-def get_upstream_sequence(row, seq, ngg_range, ccn_range):
+
+def find_PAM(row, seq, ngg_range, ccn_range):
     upstream_bp = 110
     pos = row["Position"]
     
@@ -231,7 +257,7 @@ def get_upstream_sequence(row, seq, ngg_range, ccn_range):
                 if i > 1:
                     pam_pos = upstream_bp - (i - 1) # location of N
                     try:
-                            NGG_count[pam_pos] += 1
+                        NGG_count[pam_pos] += 1
                     except:
                         NGG_count[pam_pos] = 1
                     if pam_pos in ngg_range:
@@ -257,9 +283,10 @@ def get_upstream_sequence(row, seq, ngg_range, ccn_range):
                         pam_site.append((pam_seq, pam_pos, genome_pos))
                         
         pam_num = len(pam_site)
-    return pd.Series([row["Locus tag"], pam_exist, pam_num, pam_strand, pam_site], index=["Locus tag", "PAM exist", "PAM num", "PAM strand", "PAM sites"])
+    return pd.Series([row["Locus tag"], row["Product"], row["UTR length"], pam_exist, pam_num, pam_strand, pam_site], index=["Locus tag", "description", "UTR length", "PAM exist", "PAM num", "PAM strand", "PAM sites"])
 
-filtered_genes = excel_f[excel_f.apply(lambda row: filter_fun(row, seq), axis = 1)]
+filtered_genes = excel_f[excel_f.apply(lambda row: filter_by_intergenic_len(row, seq), axis = 1)]
+print("There are {} genes with a intergenic region that are long enough".format(len(filtered_genes)))
 
 tol = 2
 ngg_range = set()
@@ -271,22 +298,47 @@ ccn_pos = [range(81-tol, 81+tol+1), range(91-tol, 91+tol+1), range(101-tol, 101+
 for c in ccn_pos:
     ccn_range = ccn_range.union(set(c))
 
-pam = filtered_genes.apply(lambda row: get_upstream_sequence(row, seq, ngg_range, ccn_range), axis = 1)
+pam_filter = filtered_genes.apply(lambda row: find_PAM(row, seq, ngg_range, ccn_range), axis = 1)
 # filtered_genes.to_excel("viable_genes_offset_100.xlsx")
-pam = pam[pam["PAM exist"]]
-print(filtered_genes["Locus tag"])
-print(len(seq))
 
-plt.figure()
-plt.bar(CCN_count.keys(), CCN_count.values())
-plt.show()
-plt.figure()
-plt.bar(NGG_count.keys(), NGG_count.values())
-plt.show()
-# plt.plot(pam["Locus tag"], pam["PAM sites"])
+genes_with_pam = pam_filter[pam_filter["PAM exist"]]
 
-filtered_tags = set(pam["Locus tag"])
-invalid_tags = filtered_tags.intersection(unmatch_start_tags)
-print(invalid_tags)
-print(len(invalid_tags))
+# =============================================================================
+# plt.figure()
+# plt.bar(CCN_count.keys(), CCN_count.values())
+# plt.show()
+# plt.figure()
+# plt.bar(NGG_count.keys(), NGG_count.values())
+# plt.show()
+# =============================================================================
+
+genes_with_pam_tag = set(genes_with_pam["Locus tag"])
+print(len(genes_with_pam_tag))
+genes_with_pam_tag = genes_with_pam_tag - unmatch_gene_len
+print("after removing genes with unequal length: {}\n".format(len(genes_with_pam_tag)))
+# unmatching tags are genes with matching length and dir but not start
+genes_with_pam_unmatching = genes_with_pam_tag.intersection(unmatching_tags) # find genes with pam sites but are not matching in the Excel and genbank file
+print("There are {} genes with a PAM site at a valid location".format(len(genes_with_pam_tag)))
+print("When taking the intersect of genes with PAM sites and genes that are not matching, there are {} results".format(len(genes_with_pam_unmatching)))
+print("Therefore these genes need to be analyzed and see if their sequence are the same between different versions")
+
+genes_passed_comp = compare_version(genes_with_pam_unmatching)
+valid_gene = (genes_with_pam_tag - genes_with_pam_unmatching).union(genes_passed_comp)
+
+def update_TSS_pos(df):
+    utr_len = df["UTR length"]
+    pam_strand = df["PAM strand"]
+    if pam_strand == "-":
+        
+        print("hello")
+    elif pam_strand == "+":
+        print("hello")
+    else:
+        yout
+        raise Exception("wrong strand format: {}".format(pam_strand))
+    print("hello")
+    
+genes_pam_final = genes_with_pam[genes_with_pam["Locus tag"].isin(valid_gene)]
+
+
 
