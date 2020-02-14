@@ -13,7 +13,16 @@ sequence_file = "Putida KT2440.gbff"#"putida_v3.gb" #"Putida KT2440.gbff" #  "se
 def excel_file_processing():
     f = pd.read_excel("primary TSS.xlsx", usecols=lambda x: 'Unnamed' not in x)
     return f
-    
+
+
+dummy = {'1': [1, 2, 3, 4, 5], '2': [6, 7, 8, 9, 0]}
+df = pd.DataFrame(dummy, columns = ['1', '2'])
+df_copy = df.copy(deep=True)
+def apply_fcn(row):
+    return row['1'] + 1
+df["1"] = df.apply(apply_fcn, axis=1)
+
+ 
 # Condition, Position, Strand, Locus tag, Product, Gene length, UTR length, Primary
 
 excel_f = excel_file_processing()
@@ -209,23 +218,29 @@ def compare_version(unmatch_start_tags):
 def filter_by_intergenic_len(row, seq):
     offset = 100
     tag = row["Locus tag"]
-    tss_pos = row["Position"]
+    utr_len = row["UTR length"]
+    no_overlap = False
     if tag in seq:
         gene_num = seq[tag]["gene_num"]
         if seq[tag]["feature"].strand == -1:
+            gene_start_pos = seq[tag]["feature"].location.end
+            tss_pos = gene_start_pos + utr_len
             adjacent_gene_num = gene_num + 1
             adjacent_gene_tag = list_of_genes[adjacent_gene_num - 1]
             start_pos = seq[adjacent_gene_tag]["feature"].location.start
-            return True if tss_pos < (start_pos - offset) else False
+            no_overlap = True if tss_pos < (start_pos - offset) else False
         elif seq[tag]["feature"].strand == 1:
+            gene_start_pos = seq[tag]["feature"].location.start + 1
+            tss_pos = gene_start_pos - utr_len
             adjacent_gene_num = gene_num - 1
             adjacent_gene_tag = list_of_genes[adjacent_gene_num - 1]
             end_pos = seq[adjacent_gene_tag]["feature"].location.end   
-            return True if tss_pos > (end_pos + offset) else False
+            no_overlap = True if tss_pos > (end_pos + offset) else False
         else:
             raise Exception("wrong strand input format: {}".format(seq[tag]["feature"].strand))
     else:
         return False
+    return pd.Series([tss_pos, no_overlap])
 
 NGG_count = dict()
 CCN_count = dict()
@@ -285,7 +300,10 @@ def find_PAM(row, seq, ngg_range, ccn_range):
         pam_num = len(pam_site)
     return pd.Series([row["Locus tag"], row["Product"], row["UTR length"], pam_exist, pam_num, pam_strand, pam_site], index=["Locus tag", "description", "UTR length", "PAM exist", "PAM num", "PAM strand", "PAM sites"])
 
-filtered_genes = excel_f[excel_f.apply(lambda row: filter_by_intergenic_len(row, seq), axis = 1)]
+excel_f_copy = excel_f.copy(deep=True)
+excel_f_copy[["Position", "No overlap"]] = excel_f.apply(lambda row: filter_by_intergenic_len(row, seq), axis = 1)
+filtered_genes = excel_f_copy[excel_f_copy["No overlap"]]
+#filtered_genes = excel_f[excel_f.apply(lambda row: filter_by_intergenic_len(row, seq), axis = 1)]
 print("There are {} genes with a intergenic region that are long enough".format(len(filtered_genes)))
 
 tol = 2
@@ -325,20 +343,24 @@ print("Therefore these genes need to be analyzed and see if their sequence are t
 genes_passed_comp = compare_version(genes_with_pam_unmatching)
 valid_gene = (genes_with_pam_tag - genes_with_pam_unmatching).union(genes_passed_comp)
 
-def update_TSS_pos(df):
-    utr_len = df["UTR length"]
-    pam_strand = df["PAM strand"]
+def update_TSS_pos(row):
+    locus_tag = row["Locus tag"]
+    utr_len = row["UTR length"]
+    pam_strand = row["PAM strand"]
     if pam_strand == "-":
-        
-        print("hello")
+        gene_start_pos = seq[locus_tag]["feature"].location.end
+        new_tss_pos = gene_start_pos + utr_len
     elif pam_strand == "+":
-        print("hello")
+        gene_start_pos = seq[locus_tag]["feature"].location.start + 1
+        new_tss_pos = gene_start_pos - utr_len
+        return 
     else:
-        yout
         raise Exception("wrong strand format: {}".format(pam_strand))
-    print("hello")
+    
     
 genes_pam_final = genes_with_pam[genes_with_pam["Locus tag"].isin(valid_gene)]
+genes_pam_final.to_csv("information.csv")
+#tss_row genes_pam_final.apply(lambda row: update_TSS_pos(rowho), axis=1)
 
 
 
