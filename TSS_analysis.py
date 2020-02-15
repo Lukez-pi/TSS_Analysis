@@ -15,13 +15,14 @@ def excel_file_processing():
     return f
 
 
-dummy = {'1': [1, 2, 3, 4, 5], '2': [6, 7, 8, 9, 0]}
-df = pd.DataFrame(dummy, columns = ['1', '2'])
-df_copy = df.copy(deep=True)
-def apply_fcn(row):
-    return row['1'] + 1
-df["1"] = df.apply(apply_fcn, axis=1)
-
+# =============================================================================
+# dummy = {'1': [1, 2, 3, 4, 5], '2': [6, 7, 8, 9, 0]}
+# df = pd.DataFrame(dummy, columns = ['1', '2'])
+# df_copy = df.copy(deep=True)
+# def apply_fcn(row):
+#     return row['1'] + 1
+# df["1"] = df.apply(apply_fcn, axis=1) 
+# =============================================================================
  
 # Condition, Position, Strand, Locus tag, Product, Gene length, UTR length, Primary
 
@@ -33,7 +34,7 @@ for seq_record in SeqIO.parse(sequence_file, "genbank"):
     gene_counter = 1
     previous_start = 0
     for feature in seq_record.features:
-        if feature.type == "CDS":
+        if feature.type == "gene":
             temp = feature.qualifiers["locus_tag"][0].split("_")
             locus_tag = temp[0] + temp[1]
             strand = feature.strand
@@ -266,7 +267,7 @@ def find_PAM(row, seq, ngg_range, ccn_range):
     pam_strand = ""
     pam_site = []
     
-    for i in range(upstream_bp - 2):
+    for i in range(upstream_bp - 1):
         if seq_str[i] == "G":
             if seq_str[i+1] == "G":
                 if i > 1:
@@ -283,19 +284,18 @@ def find_PAM(row, seq, ngg_range, ccn_range):
                         pam_site.append((pam_seq, pam_pos, genome_pos))
                         
         elif seq_str[i] == "C":
-            if seq_str[i+1] == "C":
-                if i < upstream_bp - 2:
-                    pam_pos = upstream_bp - (i + 3) # location of the nucleotide right after N
-                    try:
-                            CCN_count[pam_pos] += 1
-                    except:
-                        CCN_count[pam_pos] = 1
-                    if pam_pos in ccn_range:
-                        pam_exist = True
-                        pam_strand = row["Strand"]
-                        genome_pos = pos + pam_pos if row["Strand"] == "-" else pos - pam_pos
-                        pam_seq = seq_str[i : (i+3)]
-                        pam_site.append((pam_seq, pam_pos, genome_pos))
+            if seq_str[i-1] == "C":
+                pam_pos = upstream_bp - (i + 2) # location of the nucleotide right after N
+                try:
+                        CCN_count[pam_pos] += 1
+                except:
+                    CCN_count[pam_pos] = 1
+                if pam_pos in ccn_range:
+                    pam_exist = True
+                    pam_strand = row["Strand"]
+                    genome_pos = pos + pam_pos if row["Strand"] == "-" else pos - pam_pos
+                    pam_seq = seq_str[(i-1) : (i+2)]
+                    pam_site.append((pam_seq, pam_pos, genome_pos))
                         
         pam_num = len(pam_site)
     return pd.Series([row["Locus tag"], row["Product"], row["UTR length"], pam_exist, pam_num, pam_strand, pam_site], index=["Locus tag", "description", "UTR length", "PAM exist", "PAM num", "PAM strand", "PAM sites"])
@@ -335,7 +335,7 @@ print(len(genes_with_pam_tag))
 genes_with_pam_tag = genes_with_pam_tag - unmatch_gene_len
 print("after removing genes with unequal length: {}\n".format(len(genes_with_pam_tag)))
 # unmatching tags are genes with matching length and dir but not start
-genes_with_pam_unmatching = genes_with_pam_tag.intersection(unmatching_tags) # find genes with pam sites but are not matching in the Excel and genbank file
+genes_with_pam_unmatching = genes_with_pam_tag.intersection(unmatching_tags) # find genes with pam sites but the start codon position are not matching in the Excel and genbank file
 print("There are {} genes with a PAM site at a valid location".format(len(genes_with_pam_tag)))
 print("When taking the intersect of genes with PAM sites and genes that are not matching, there are {} results".format(len(genes_with_pam_unmatching)))
 print("Therefore these genes need to be analyzed and see if their sequence are the same between different versions")
@@ -343,19 +343,6 @@ print("Therefore these genes need to be analyzed and see if their sequence are t
 genes_passed_comp = compare_version(genes_with_pam_unmatching)
 valid_gene = (genes_with_pam_tag - genes_with_pam_unmatching).union(genes_passed_comp)
 
-def update_TSS_pos(row):
-    locus_tag = row["Locus tag"]
-    utr_len = row["UTR length"]
-    pam_strand = row["PAM strand"]
-    if pam_strand == "-":
-        gene_start_pos = seq[locus_tag]["feature"].location.end
-        new_tss_pos = gene_start_pos + utr_len
-    elif pam_strand == "+":
-        gene_start_pos = seq[locus_tag]["feature"].location.start + 1
-        new_tss_pos = gene_start_pos - utr_len
-        return 
-    else:
-        raise Exception("wrong strand format: {}".format(pam_strand))
     
     
 genes_pam_final = genes_with_pam[genes_with_pam["Locus tag"].isin(valid_gene)]
