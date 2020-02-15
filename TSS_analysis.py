@@ -246,7 +246,7 @@ def filter_by_intergenic_len(row, seq):
 NGG_count = dict()
 CCN_count = dict()
 
-def find_PAM(row, seq, ngg_range, ccn_range):
+def find_PAM(row, seq, type_Cas9, ngg_range, ccn_range):
     upstream_bp = 110
     pos = row["Position"]
     
@@ -267,10 +267,13 @@ def find_PAM(row, seq, ngg_range, ccn_range):
     pam_strand = ""
     pam_site = []
     
-    for i in range(upstream_bp - 1):
-        if seq_str[i] == "G":
-            if seq_str[i+1] == "G":
-                if i > 1:
+    for i in range(upstream_bp - 1):        
+        if type_Cas9 == "dxCas9_3.7":
+            if seq_str[i] == "G" or seq_str[i] == "A":
+                if seq_str[i] == "A":
+                    if [seq_str[i-1], seq_str[i+1]] not in [["G", "A"], ["G", "T"], ["C", "A"]]:
+                        continue
+                if i > 0:
                     pam_pos = upstream_bp - (i - 1) # location of N
                     try:
                         NGG_count[pam_pos] += 1
@@ -281,23 +284,55 @@ def find_PAM(row, seq, ngg_range, ccn_range):
                         pam_strand = row["Strand"]
                         genome_pos = pos + pam_pos if row["Strand"] == "-" else pos - pam_pos
                         pam_seq = seq_str[(i-1) : (i+2)]
+                        pam_site.append((pam_seq, pam_pos, genome_pos))                        
+            elif seq_str[i] == "C" or seq_str[i] == "T":
+                if seq_str[i] == "T":
+                    if [seq_str[i-1], seq_str[i+1]] not in [["T", "C"], ["A", "C"], ["T", "G"]]:
+                        continue
+                if i > 0:
+                    pam_pos = upstream_bp - (i + 2) # location of the nucleotide right after N
+                    try:
+                            CCN_count[pam_pos] += 1
+                    except:
+                        CCN_count[pam_pos] = 1
+                    if pam_pos in ccn_range:
+                        pam_exist = True
+                        pam_strand = row["Strand"]
+                        genome_pos = pos + pam_pos if row["Strand"] == "-" else pos - pam_pos
+                        pam_seq = seq_str[(i-1) : (i+2)]
                         pam_site.append((pam_seq, pam_pos, genome_pos))
-                        
-        elif seq_str[i] == "C":
-            if seq_str[i-1] == "C":
-                pam_pos = upstream_bp - (i + 2) # location of the nucleotide right after N
-                try:
-                        CCN_count[pam_pos] += 1
-                except:
-                    CCN_count[pam_pos] = 1
-                if pam_pos in ccn_range:
-                    pam_exist = True
-                    pam_strand = row["Strand"]
-                    genome_pos = pos + pam_pos if row["Strand"] == "-" else pos - pam_pos
-                    pam_seq = seq_str[(i-1) : (i+2)]
-                    pam_site.append((pam_seq, pam_pos, genome_pos))
-                        
-        pam_num = len(pam_site)
+                
+        elif type_Cas9 == "dCas9":
+            if seq_str[i] == "G":
+                if seq_str[i+1] == "G":
+                    if i > 0:
+                        pam_pos = upstream_bp - (i - 1) # location of N
+                        try:
+                            NGG_count[pam_pos] += 1
+                        except:
+                            NGG_count[pam_pos] = 1
+                        if pam_pos in ngg_range:
+                            pam_exist = True
+                            pam_strand = row["Strand"]
+                            genome_pos = pos + pam_pos if row["Strand"] == "-" else pos - pam_pos
+                            pam_seq = seq_str[(i-1) : (i+2)]
+                            pam_site.append((pam_seq, pam_pos, genome_pos))
+            elif seq_str[i] == "C":
+                if seq_str[i-1] == "C":
+                    pam_pos = upstream_bp - (i + 2) # location of the nucleotide right after N
+                    try:
+                            CCN_count[pam_pos] += 1
+                    except:
+                        CCN_count[pam_pos] = 1
+                    if pam_pos in ccn_range:
+                        pam_exist = True
+                        pam_strand = row["Strand"]
+                        genome_pos = pos + pam_pos if row["Strand"] == "-" else pos - pam_pos
+                        pam_seq = seq_str[(i-1) : (i+2)]
+                        pam_site.append((pam_seq, pam_pos, genome_pos))
+        else:
+            raise Exception("invalid type of cas9, acceptable ones are dxCas9_3.7 or dCas9, you input {}".format(type_Cas9))
+    pam_num = len(pam_site)
     return pd.Series([row["Locus tag"], row["Product"], row["UTR length"], pam_exist, pam_num, pam_strand, pam_site], index=["Locus tag", "description", "UTR length", "PAM exist", "PAM num", "PAM strand", "PAM sites"])
 
 excel_f_copy = excel_f.copy(deep=True)
@@ -316,7 +351,7 @@ ccn_pos = [range(81-tol, 81+tol+1), range(91-tol, 91+tol+1), range(101-tol, 101+
 for c in ccn_pos:
     ccn_range = ccn_range.union(set(c))
 
-pam_filter = filtered_genes.apply(lambda row: find_PAM(row, seq, ngg_range, ccn_range), axis = 1)
+pam_filter = filtered_genes.apply(lambda row: find_PAM(row, seq, "dxCas9_3.7", ngg_range, ccn_range), axis = 1)
 # filtered_genes.to_excel("viable_genes_offset_100.xlsx")
 
 genes_with_pam = pam_filter[pam_filter["PAM exist"]]
