@@ -9,52 +9,55 @@ from matplotlib import pyplot as plt
 import openpyxl
 import pandas as pd
 
+tol = 2
+ngg_range = set()
+ngg_pos = [range(70-tol, 70+tol+1), range(80-tol, 80+tol+1), range(90-tol, 90+tol+1)]
+for n in ngg_pos:
+    ngg_range = ngg_range.union(set(n))
+ccn_range = set()
+ccn_pos = [range(81-tol, 81+tol+1), range(91-tol, 91+tol+1), range(101-tol, 101+tol+1)]
+for c in ccn_pos:
+    ccn_range = ccn_range.union(set(c))
+    
 sequence_file = "Putida KT2440.gbff"#"putida_v3.gb" #"Putida KT2440.gbff" #  "sequence.gb"
+
 def excel_file_processing():
     f = pd.read_excel("primary TSS.xlsx", usecols=lambda x: 'Unnamed' not in x)
     return f
-
-
-# =============================================================================
-# dummy = {'1': [1, 2, 3, 4, 5], '2': [6, 7, 8, 9, 0]}
-# df = pd.DataFrame(dummy, columns = ['1', '2'])
-# df_copy = df.copy(deep=True)
-# def apply_fcn(row):
-#     return row['1'] + 1
-# df["1"] = df.apply(apply_fcn, axis=1) 
-# =============================================================================
  
 # Condition, Position, Strand, Locus tag, Product, Gene length, UTR length, Primary
 
-excel_f = excel_file_processing()
-
-list_of_genes = []
-seq = dict()
-for seq_record in SeqIO.parse(sequence_file, "genbank"):
-    gene_counter = 1
-    previous_start = 0
-    for feature in seq_record.features:
-        if feature.type == "gene":
-            temp = feature.qualifiers["locus_tag"][0].split("_")
-            locus_tag = temp[0] + temp[1]
-            strand = feature.strand
-            if strand == -1:
-                start_position = feature.location.end
-                end_position = feature.location.start
-            else:
-                start_position = feature.location.start
-                end_position = feature.location.end
-
-            previous_start = start_position
-            
-            seq[locus_tag] = {"feature": feature, "gene_num": gene_counter}
-            list_of_genes.append(locus_tag)
-            gene_counter += 1
-            
-    print("total number of genes")
-    print(gene_counter-1)
-
-def test_gene(f):
+def parse_genbank(feature_type):
+    seq = dict()
+    list_of_genes = []
+    if feature_type not in ["gene", "CDS"]:
+        raise Exception("incorrect feature type: {}".format(feature_type))
+    for seq_record in SeqIO.parse(sequence_file, "genbank"):
+        gene_counter = 1
+        previous_start = 0
+        for feature in seq_record.features:
+            if feature.type == feature_type:
+                temp = feature.qualifiers["locus_tag"][0].split("_")
+                locus_tag = temp[0] + temp[1]
+                strand = feature.strand
+                if strand == -1:
+                    start_position = feature.location.end
+                    end_position = feature.location.start
+                else:
+                    start_position = feature.location.start
+                    end_position = feature.location.end
+    
+                previous_start = start_position
+                
+                seq[locus_tag] = {"feature": feature, "gene_num": gene_counter}
+                list_of_genes.append(locus_tag)
+                gene_counter += 1
+                
+        print("total number of genes")
+        print(gene_counter-1)
+        return [seq, list_of_genes]
+    
+def compare_genbank_excel(f):
     # f is the excel file
     unfound_tags = []
     overlapping_genes = []
@@ -135,16 +138,6 @@ def test_gene(f):
     for (tag, d) in unmatch_start_neg:
         unmatch_start_tags.add(tag)
         diff_neg.append(d)
-    # plot the number of base pairs that the excel data and the gen bank data differ by
-# =============================================================================
-#     plt.figure()
-#     plt.title("diff pos")
-#     plt.hist(diff_pos)
-#         
-#     plt.figure()
-#     plt.title("diff neg")
-#     plt.hist(diff_neg)
-# =============================================================================
     
     unmatch_start_match_len = unmatch_start_tags - set(unmatch_gene_len)
     unmatch_start_match_len_match_dir = unmatch_start_match_len - set(unmatch_direction)
@@ -152,8 +145,6 @@ def test_gene(f):
     print("Additionally, when we remove the genes that are also unmatching in direction")
     print("This leaves us with {} genes to be matching in length, direction but not starting sites\n".format(len(unmatch_start_match_len_match_dir)))
     return [set(unmatch_gene_len), unmatch_start_match_len_match_dir]
-    
-[unmatch_gene_len, unmatching_tags] = test_gene(excel_f) 
 
 def compare_version(unmatch_start_tags):
     unmatch_version_tags = []
@@ -243,8 +234,6 @@ def filter_by_intergenic_len(row, seq):
         return False
     return pd.Series([tss_pos, no_overlap])
 
-NGG_count = dict()
-CCN_count = dict()
 
 def find_PAM(row, seq, type_Cas9, ngg_range, ccn_range):
     upstream_bp = 110
@@ -292,7 +281,7 @@ def find_PAM(row, seq, type_Cas9, ngg_range, ccn_range):
                 if i > 0:
                     pam_pos = upstream_bp - (i + 2) # location of the nucleotide right after N
                     try:
-                            CCN_count[pam_pos] += 1
+                        CCN_count[pam_pos] += 1
                     except:
                         CCN_count[pam_pos] = 1
                     if pam_pos in ccn_range:
@@ -321,7 +310,7 @@ def find_PAM(row, seq, type_Cas9, ngg_range, ccn_range):
                 if seq_str[i-1] == "C":
                     pam_pos = upstream_bp - (i + 2) # location of the nucleotide right after N
                     try:
-                            CCN_count[pam_pos] += 1
+                        CCN_count[pam_pos] += 1
                     except:
                         CCN_count[pam_pos] = 1
                     if pam_pos in ccn_range:
@@ -335,38 +324,26 @@ def find_PAM(row, seq, type_Cas9, ngg_range, ccn_range):
     pam_num = len(pam_site)
     return pd.Series([row["Locus tag"], row["Product"], row["UTR length"], pam_exist, pam_num, pam_strand, pam_site], index=["Locus tag", "description", "UTR length", "PAM exist", "PAM num", "PAM strand", "PAM sites"])
 
+
+excel_f = excel_file_processing()
+[seq, list_of_genes] = parse_genbank("CDS")
+
 excel_f_copy = excel_f.copy(deep=True)
 excel_f_copy[["Position", "No overlap"]] = excel_f.apply(lambda row: filter_by_intergenic_len(row, seq), axis = 1)
 filtered_genes = excel_f_copy[excel_f_copy["No overlap"]]
-#filtered_genes = excel_f[excel_f.apply(lambda row: filter_by_intergenic_len(row, seq), axis = 1)]
 print("There are {} genes with a intergenic region that are long enough".format(len(filtered_genes)))
 
-tol = 2
-ngg_range = set()
-ngg_pos = [range(70-tol, 70+tol+1), range(80-tol, 80+tol+1), range(90-tol, 90+tol+1)]
-for n in ngg_pos:
-    ngg_range = ngg_range.union(set(n))
-ccn_range = set()
-ccn_pos = [range(81-tol, 81+tol+1), range(91-tol, 91+tol+1), range(101-tol, 101+tol+1)]
-for c in ccn_pos:
-    ccn_range = ccn_range.union(set(c))
+[unmatch_gene_len, unmatching_tags] = compare_genbank_excel(excel_f) 
 
-pam_filter = filtered_genes.apply(lambda row: find_PAM(row, seq, "dxCas9_3.7", ngg_range, ccn_range), axis = 1)
+NGG_count = dict()
+CCN_count = dict()
+pam_filter = filtered_genes.apply(lambda row: find_PAM(row, seq, "dCas9", ngg_range, ccn_range), axis = 1)
 # filtered_genes.to_excel("viable_genes_offset_100.xlsx")
 
 genes_with_pam = pam_filter[pam_filter["PAM exist"]]
 
-# =============================================================================
-# plt.figure()
-# plt.bar(CCN_count.keys(), CCN_count.values())
-# plt.show()
-# plt.figure()
-# plt.bar(NGG_count.keys(), NGG_count.values())
-# plt.show()
-# =============================================================================
-
 genes_with_pam_tag = set(genes_with_pam["Locus tag"])
-print(len(genes_with_pam_tag))
+print("Out of all genes with a long enough intergenic region, there are {} genes with a pam tag".format(len(genes_with_pam_tag)))
 genes_with_pam_tag = genes_with_pam_tag - unmatch_gene_len
 print("after removing genes with unequal length: {}\n".format(len(genes_with_pam_tag)))
 # unmatching tags are genes with matching length and dir but not start
@@ -376,11 +353,9 @@ print("When taking the intersect of genes with PAM sites and genes that are not 
 print("Therefore these genes need to be analyzed and see if their sequence are the same between different versions")
 
 genes_passed_comp = compare_version(genes_with_pam_unmatching)
-valid_gene = (genes_with_pam_tag - genes_with_pam_unmatching).union(genes_passed_comp)
-
-    
-    
-genes_pam_final = genes_with_pam[genes_with_pam["Locus tag"].isin(valid_gene)]
+valid_genes = (genes_with_pam_tag - genes_with_pam_unmatching).union(genes_passed_comp)
+genes_pam_final = genes_with_pam[genes_with_pam["Locus tag"].isin(valid_genes)]
+print("After the final round of filtering, there are {} genes with valid pam".format(len(valid_genes)))
 genes_pam_final.to_csv("information.csv")
 #tss_row genes_pam_final.apply(lambda row: update_TSS_pos(rowho), axis=1)
 
